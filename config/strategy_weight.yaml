@@ -1,0 +1,45 @@
+# ══════════════════════════════════════════════════════════════════════════
+# 策略启用/禁用开关 + 权重配置
+# ══════════════════════════════════════════════════════════════════════════
+
+# 全局模式: all | duan | marks | dong | duan+dong | common
+mode: all
+
+# 各大师启用/禁用
+enable:
+  duan: true
+  dong: true
+  marks: true
+
+# 默认权重（仅 all 模式下生效）
+# 注：三框架是串联关系非加权叠加，权重仅用于报告中的综合评分展示
+weight:
+  duan: 0.50
+  dong: 0.35
+  marks: 0.15
+
+# 模块级别精细控制
+modules:
+  duan:
+    circle_of_competence: true      # 能力圈检查
+    margin_of_safety: true          # 安全边际
+    moat_check: true                # 护城河
+    good_business: true             # 好生意(ROIC)
+  dong:
+    defensive_scoring: true         # 防御股5维打分
+    cyclical_scoring: true          # 周期股5维打分
+    red_line_screening: true        # 8项红线筛查
+    industry_screening: true        # 行业四步法
+    rebalance_engine: true          # 再平衡引擎
+  marks:
+    cycle_positioning: true         # 周期定位
+    contrarian_strength: true       # 逆向强度
+    risk_premium: true              # 风险溢价
+
+# 极简模式（common）— 仅三框架交集规则
+common_rules:
+  - "thesis_required"               # 必须写 Thesis
+  - "circle_of_competence"          # 不懂不投
+  - "margin_of_safety"              # 有安全边际
+  - "position_sizing"               # 仓位控制
+  - "stop_loss"                     # 必须有止损

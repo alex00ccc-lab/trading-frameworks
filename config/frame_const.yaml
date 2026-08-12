@@ -1,0 +1,110 @@
+# ══════════════════════════════════════════════════════════════════════════
+# Trading Frameworks — 统一阈值配置
+# 所有大师框架共享同一份常量，禁止各仓库硬编码。
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── 框架版本 ──
+framework_version: "1.0.0"
+
+# ── 仓位管理 (from CLAUDE.md §15.1) ──
+position_limits:
+  max_single_pct: 15          # 单票 ≤ 组合 15%
+  max_market_pct: 40          # 单市场 ≤ 组合 40%
+  max_high_beta_pct: 5        # β > 1.5 标的 ≤ 5%
+  cash_buffer_min_pct: 10     # 现金缓冲 ≥ 10%
+  max_position_count: 12      # 持仓数量 8-12
+  max_new_monthly: 3          # 每月最多新开 3 个
+
+# ── 行业配置 (董艺婷 §2.2) ──
+industry_limits:
+  max_single_sector_pct: 25   # 单一行业 ≤ 25%（风险贡献）
+  min_defensive_pct: 30       # 防御层 ≥ 30%
+  max_offensive_pct: 35       # 进攻层 ≤ 35%
+  min_uncorrelated: 3         # 至少 3 个不相关行业
+
+# ── 打分阈值 ──
+scoring:
+  duan:
+    pass_threshold: 60        # 段永平总分 ≥ 60 方可建仓
+  marks:
+    pass_threshold: 50        # 马克斯周期分 ≥ 50 方可建仓
+  dong:
+    defensive_pass: 60        # 防御股 ≥ 60
+    defensive_floor: 40       # < 40 不建仓
+    cyclical_pass: 50         # 周期股 ≥ 50
+    cyclical_ban: 30          # < 30 禁止参与
+    pass_threshold: 60        # 综合 ≥ 60
+
+# ── 降级兜底 ──
+degradation:
+  neutral_score: 40           # 数据不可用时的中性分
+  cache_ttl_days: 3           # 框架打分缓存 TTL
+  shareholder_cache_ttl_days: 90  # 股东申报缓存 TTL
+
+# ── 止盈阶梯 ──
+take_profit:
+  defensive:
+    - pct: 15
+      action: "sell_third"
+    - pct: 30
+      action: "sell_another_third"
+    - pct: 50
+      action: "keep_core_20pct"
+  cyclical:
+    - pct: 15
+      action: "sell_third"
+    - pct: 30
+      action: "clear_all"
+
+# ── 止损 ──
+stop_loss:
+  initial_pct: -8             # 初始止损
+  hard_pct: -12               # 硬止损
+
+# ── 升级追踪 ──
+escalation:
+  yellow_to_red_months: 3     # 连续黄灯月数 → 升级红灯
+  unexecuted_proposals_max: 2 # 连续不执行提案 → 告警升级
+
+# ── 抓取合规参数 ──
+fetch_compliance:
+  sec_edgar:
+    max_req_per_sec: 9        # 官方上限 10，留 1 冗余
+    ua_email: "placeholder@example.com"  # 用户需自行替换
+    ci_frequency: "weekly"    # CI 每周六一次
+    retry_backoff: [1, 2, 4]  # 指数退避秒数
+  hkex_di:
+    max_req_per_symbol_day: 6
+    interval_sec: [2, 5]      # 随机间隔范围
+    ci_frequency: "weekly"
+  default_timeout_sec: 12
+
+# ── 大股东告警分级 ──
+shareholder_alert:
+  strong_pct: 1.0             # ±1% → 强信号，实时推送
+  mild_pct: 0.5               # 0.5-1% → 周报
+  noise_pct: 0.5              # < 0.5% → 忽略
+  signal_weight:
+    real_buy: 1.5
+    real_sell: 0.3
+    derivative_noise: 0.0
+
+# ── 行业分类 ──
+sectors:
+  defensive:
+    - "Consumer Staples"
+    - "Healthcare"
+    - "Utilities"
+    - "Telecom"
+    - "Cash Equivalent"
+    - "Broad Market Index"
+  cyclical:
+    - "Semiconductors"
+    - "Technology Hardware"
+    - "Software"
+    - "Financials"
+    - "Energy"
+    - "Materials"
+    - "Industrial"
+    - "Consumer Discretionary"
+    - "Real Estate"

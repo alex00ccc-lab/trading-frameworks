@@ -1,0 +1,57 @@
+# ══════════════════════════════════════════════════════════════════════════
+# 大股东持仓追踪配置
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── 追踪名单 ──
+tracked:
+  "段永平 (Duan Yongping)":
+    - 9992.HK    # 泡泡马特 — 第二大股东
+    - AAPL       # 苹果
+    # 按需添加更多标的
+
+  # 未来可扩展:
+  # "巴菲特 (Warren Buffett)":
+  #   - AAPL
+  #   - BAC
+  # "木头姐 (Cathie Wood)":
+  #   - TSLA
+  #   - COIN
+
+# ── 告警分级 ──
+alert_on:
+  real_sell: true           # 真实减持 → 立即告警
+  real_buy: true            # 真实增持 → 提示关注
+  derivative: false         # 衍生品结算 → 仅记录，不告警（但标注市场可能误读）
+  collateral_change: true   # 质押变动 → 提示关注
+
+alert_threshold:
+  strong_buy_pct: 1.0       # 增持超 1% 推送强利好
+  strong_sell_pct: -1.0     # 减持超 1% 推送强利空
+  mild_change_pct: 0.5      # 0.5~1% 仅周报展示，不实时推送
+  noise_pct: 0.5            # 低于阈值完全忽略
+
+# ── 信号权重（用于大师打分修正） ──
+signal_weight:
+  real_buy: 1.5             # 真实买入强化信号
+  real_sell: 0.3            # 真实卖出信号
+  derivative_noise: 0.0     # 衍生品噪音不参与打分
+
+# ── 噪音过滤 ──
+noise_filter:
+  rolling_window_days: 30           # 滚动窗口
+  derivative_net_change_max: 0.3    # 衍生品净变动 < ±0.3% → 噪音
+  min_shares_pct: 0.5               # < 0.5% 总股本变动 → 忽略
+
+# ── 数据源配置 ──
+data_sources:
+  sec_edgar:
+    enabled: true
+    url: "https://www.sec.gov/cgi-bin/browse-edgar"
+    backup: "AKShare"
+  hkex_di:
+    enabled: true
+    url: "https://di.hkex.com.hk/di/NSSrch.aspx"
+    backup: "AKShare"
+  a_share:
+    enabled: false
+    backup: "AKShare"
