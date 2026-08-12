@@ -1,0 +1,47 @@
+name: Unit Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+
+      - name: Run tests
+        run: |
+          python -m pytest tests/ -v --tb=short
+
+      - name: Verify config files parseable
+        run: |
+          python -c "import yaml; yaml.safe_load(open('config/frame_const.yaml')); print('frame_const OK')"
+          python -c "import yaml; yaml.safe_load(open('config/strategy_weight.yaml')); print('strategy_weight OK')"
+          python -c "import yaml; yaml.safe_load(open('config/tracked_holders.yaml')); print('tracked_holders OK')"
+
+      - name: Verify YAML strategy files parseable
+        run: |
+          python -c "
+          import yaml, glob
+          for path in glob.glob('**/dsa-strategies/*.yml', recursive=True):
+              yaml.safe_load(open(path))
+              print(f'OK: {path}')
+          print('All DSA YAMLs valid')
+          "
