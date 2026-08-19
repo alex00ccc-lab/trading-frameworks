@@ -18,11 +18,38 @@ pre-fetched data and framework-specific parameters.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Optional, Literal
+
+import yaml
 
 from duan_yongping.scoring.duan_score import score_duan
 from howard_marks.scoring.marks_score import score_marks
 from dong_yiting.scoring.dual_track import score_holding, check_red_lines, classify_holding
+
+
+# 缺分兜底分 — 与 frame_const.yaml `degradation.neutral_score: 40` 对齐。
+# master_router 为纯函数模块(无 IO),故以模块常量承载该值;缺分不应按满分放行
+# (此前误用 100),统一为中性偏禁 40。
+NEUTRAL_SCORE = 40
+
+# 董式防御股建仓门槛 — 与 frame_const.yaml scoring.dong.defensive.floor 对齐(单一事实源)。
+# 模块级一次性读 config(同 dual_track 模式);函数体仍纯(无 per-call IO)。
+_FRAME_CONST_PATH = Path(__file__).resolve().parent / "config" / "frame_const.yaml"
+
+
+def _load_frame_const() -> dict[str, Any]:
+    try:
+        with open(_FRAME_CONST_PATH, encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+_FRAME_CONST = _load_frame_const()
+_DONG_CFG = _FRAME_CONST.get("scoring", {}).get("dong", {})
+DEFENSIVE_FLOOR = _DONG_CFG.get("defensive", {}).get("floor", 40)
 
 
 ModeStr = Literal["all", "duan", "marks", "dong", "duan+dong", "common"]
@@ -287,7 +314,7 @@ def _build_checklist(
             checklist["can_buy"] = False
             checklist["hard_constraints"].append(
                 f"触发{dong['red_lines_triggered']}条红线")
-        if dong.get("total", 100) < 40:
+        if dong.get("total", NEUTRAL_SCORE) < DEFENSIVE_FLOOR:
             checklist["can_buy"] = False
 
     # Duan provides the threshold gate
@@ -298,7 +325,7 @@ def _build_checklist(
     # Marks provides timing warning
     if marks:
         checklist["cycle_label"] = marks.get("cycle_label", "")
-        if marks.get("total", 100) < 30:
+        if marks.get("total", NEUTRAL_SCORE) < 30:
             checklist["hard_constraints"].append("马克斯周期极差(≤30)")
 
     # Common rules

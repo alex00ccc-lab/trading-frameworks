@@ -12,14 +12,38 @@ Reference: 董艺婷资产配置框架 §3.1-3.3
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Optional
+
+import yaml
+
+
+_FRAME_CONST_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "frame_const.yaml"
+
+
+def _load_frame_const() -> dict[str, Any]:
+    """模块级一次性加载 frame_const.yaml(同子模块内);失败回退 {}。
+
+    本模块为纯函数模块(无 per-call IO),此处仅在 import 时读一次配置作为模块常量;
+    yaml 缺失/损坏时由下方 _FALLBACK 常量保证原行为不变(零行为变化)。
+    """
+    try:
+        with open(_FRAME_CONST_PATH, encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+_FRAME_CONST = _load_frame_const()
+_SECTORS_CFG = _FRAME_CONST.get("sectors", {})
 
 
 # ══════════════════════════════════════════════════════════════════════════
 # Sector classification
 # ══════════════════════════════════════════════════════════════════════════
 
-DEFENSIVE_SECTORS = {
+_DEFENSIVE_SECTORS_FALLBACK = {
     "Consumer Staples", "Healthcare", "Utilities", "Telecom",
     "Cash Equivalent", "Broad Market Index",
     # Chinese labels
@@ -27,7 +51,7 @@ DEFENSIVE_SECTORS = {
     "企业软件", "企业SaaS", "财税软件", "支付",
 }
 
-CYCLICAL_SECTORS = {
+_CYCLICAL_SECTORS_FALLBACK = {
     "Semiconductors", "Technology Hardware", "Software",
     "Financials", "Energy", "Materials", "Industrial",
     "Consumer Discretionary", "Real Estate",
@@ -36,6 +60,58 @@ CYCLICAL_SECTORS = {
     "通信设备", "光通信", "被动元件", "PCB/元器件",
     "新能源", "储能", "锂电材料", "机器人",
     "比特币挖矿", "房地产科技", "铀矿",
+}
+
+DEFENSIVE_SECTORS = (
+    set(_SECTORS_CFG.get("defensive")) if _SECTORS_CFG.get("defensive")
+    else _DEFENSIVE_SECTORS_FALLBACK
+)
+CYCLICAL_SECTORS = (
+    set(_SECTORS_CFG.get("cyclical")) if _SECTORS_CFG.get("cyclical")
+    else _CYCLICAL_SECTORS_FALLBACK
+)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Scoring thresholds (verdict ladder / neutral / red lines) — 单一事实源
+# 值逐字对齐 frame_const.yaml scoring.dong;config 缺失时回退硬编码(零行为变化)。
+# ══════════════════════════════════════════════════════════════════════════
+
+_DONG_CFG = _FRAME_CONST.get("scoring", {}).get("dong", {})
+
+_DEFENSIVE_TIERS = _DONG_CFG.get("defensive", {}).get("tiers") or [
+    {"min": 80, "verdict": "优质底仓", "limit_pct": 15, "rhythm": "分3批，2-3周完成"},
+    {"min": 60, "verdict": "合格底仓", "limit_pct": 10, "rhythm": "分2批，1-2周完成"},
+    {"min": 40, "verdict": "观察级", "limit_pct": 5, "rhythm": "仅轻仓观察，不加仓"},
+    {"min": 0, "verdict": "不符合防御标准", "limit_pct": 0, "rhythm": "不建仓，等待估值回落或现金流改善"},
+]
+
+_CYCLICAL_TIERS = _DONG_CFG.get("cyclical", {}).get("tiers") or [
+    {"min": 70, "verdict": "优质周期机会", "limit_pct": 10, "constraint": "分批建仓，设定明确止盈位"},
+    {"min": 50, "verdict": "可参与", "limit_pct": 5, "constraint": "仅小仓位波段，不长期持有"},
+    {"min": 30, "verdict": "高风险", "limit_pct": 3, "constraint": "仅迷你仓观察"},
+    {"min": 0, "verdict": "禁止参与", "limit_pct": 0, "constraint": "直接排除，不纳入自选"},
+]
+
+_DEFENSIVE_NEUTRAL = _DONG_CFG.get("neutral", {}).get("defensive") or {
+    "生意刚需性": 13, "现金流稳定性": 15, "估值安全边际": 10,
+    "资金逆向度": 8, "组合对冲价值": 5,
+}
+
+_CYCLICAL_NEUTRAL = _DONG_CFG.get("neutral", {}).get("cyclical") or {
+    "景气周期阶段": 15, "估值水位": 13, "供给格局": 10,
+    "防御仓覆盖": 8, "资金热度": 5,
+}
+
+_RED_LINES = _DONG_CFG.get("red_lines") or {
+    "negative_cashflow_years": 2,
+    "avg_daily_volume_min": 5_000_000,
+    "pe_percentile_high": 90,
+    "single_stock_concentration_pct": 15,
+    "debt_equity_max": 2.0,
+    "short_pct_float_max": 20,
+    "market_cap_min": 1_000_000_000,
+    "revenue_growth_decline": -30,
 }
 
 
@@ -123,10 +199,7 @@ def score_defensive(
     fund = fundamentals or {}
     dims: dict[str, int] = {}
     degraded = False
-    NEUTRAL = {
-        "生意刚需性": 13, "现金流稳定性": 15, "估值安全边际": 10,
-        "资金逆向度": 8, "组合对冲价值": 5,
-    }
+    NEUTRAL = _DEFENSIVE_NEUTRAL
 
     # ── Dimension 1: Business Moat (25 points) ──
     if business_moat > 0:
@@ -225,14 +298,13 @@ def score_defensive(
     total = sum(dims.values())
 
     # ── Verdict ──
-    if total >= 80:
-        verdict, limit_pct, rhythm = "优质底仓", 15, "分3批，2-3周完成"
-    elif total >= 60:
-        verdict, limit_pct, rhythm = "合格底仓", 10, "分2批，1-2周完成"
-    elif total >= 40:
-        verdict, limit_pct, rhythm = "观察级", 5, "仅轻仓观察，不加仓"
-    else:
-        verdict, limit_pct, rhythm = "不符合防御标准", 0, "不建仓，等待估值回落或现金流改善"
+    verdict, limit_pct, rhythm = "不符合防御标准", 0, "不建仓，等待估值回落或现金流改善"
+    for tier in sorted(_DEFENSIVE_TIERS, key=lambda t: t.get("min", 0), reverse=True):
+        if total >= tier.get("min", 0):
+            verdict = tier.get("verdict", verdict)
+            limit_pct = tier.get("limit_pct", 0)
+            rhythm = tier.get("rhythm", "")
+            break
 
     from datetime import datetime, timezone, timedelta
     return {
@@ -290,10 +362,7 @@ def score_cyclical(
     fund = fundamentals or {}
     dims: dict[str, int] = {}
     degraded = False
-    NEUTRAL = {
-        "景气周期阶段": 15, "估值水位": 13, "供给格局": 10,
-        "防御仓覆盖": 8, "资金热度": 5,
-    }
+    NEUTRAL = _CYCLICAL_NEUTRAL
 
     # ── Dimension 1: Cycle Stage (30 points) ──
     # High score = late cycle / downturn (better entry for cyclical)
@@ -371,14 +440,13 @@ def score_cyclical(
     total = sum(dims.values())
 
     # ── Verdict ──
-    if total >= 70:
-        verdict, limit_pct, constraint = "优质周期机会", 10, "分批建仓，设定明确止盈位"
-    elif total >= 50:
-        verdict, limit_pct, constraint = "可参与", 5, "仅小仓位波段，不长期持有"
-    elif total >= 30:
-        verdict, limit_pct, constraint = "高风险", 3, "仅迷你仓观察"
-    else:
-        verdict, limit_pct, constraint = "禁止参与", 0, "直接排除，不纳入自选"
+    verdict, limit_pct, constraint = "禁止参与", 0, "直接排除，不纳入自选"
+    for tier in sorted(_CYCLICAL_TIERS, key=lambda t: t.get("min", 0), reverse=True):
+        if total >= tier.get("min", 0):
+            verdict = tier.get("verdict", verdict)
+            limit_pct = tier.get("limit_pct", 0)
+            constraint = tier.get("constraint", "")
+            break
 
     from datetime import datetime, timezone, timedelta
     return {
@@ -489,37 +557,38 @@ def check_red_lines(
         List of triggered red-line checks.  Empty list = all passed.
     """
     triggers: list[dict[str, str]] = []
+    rl = _RED_LINES
 
     # Red line 1: Negative operating cashflow ≥ 2 years
-    if negative_cashflow_years >= 2:
+    if negative_cashflow_years >= rl.get("negative_cashflow_years", 2):
         triggers.append({
             "check": "negative_cashflow",
             "detail": f"近3年经营现金流有{negative_cashflow_years}年为负",
         })
 
     # Red line 2: Average daily volume < ¥5M
-    if avg_daily_volume is not None and avg_daily_volume < 5_000_000:
+    if avg_daily_volume is not None and avg_daily_volume < rl.get("avg_daily_volume_min", 5_000_000):
         triggers.append({
             "check": "low_liquidity",
             "detail": f"日均成交额 ¥{avg_daily_volume:,.0f} < ¥500万",
         })
 
     # Red line 3: PE at > 90th percentile of 5-year range
-    if pe_percentile is not None and pe_percentile > 90:
+    if pe_percentile is not None and pe_percentile > rl.get("pe_percentile_high", 90):
         triggers.append({
             "check": "pe_extreme",
             "detail": f"PE处于5年{pe_percentile:.0f}%分位",
         })
 
     # Red line 4: Single-stock concentration > 15%
-    if single_stock_concentration_pct is not None and single_stock_concentration_pct > 15:
+    if single_stock_concentration_pct is not None and single_stock_concentration_pct > rl.get("single_stock_concentration_pct", 15):
         triggers.append({
             "check": "concentration",
             "detail": f"单票集中度 {single_stock_concentration_pct:.1f}% > 15% 上限",
         })
 
     # Red line 5: D/E > 2.0 (extreme leverage)
-    if debt_equity is not None and debt_equity > 2.0:
+    if debt_equity is not None and debt_equity > rl.get("debt_equity_max", 2.0):
         triggers.append({
             "check": "extreme_leverage",
             "detail": f"净负债率 D/E={debt_equity:.1f} > 2.0",
@@ -528,21 +597,21 @@ def check_red_lines(
     # Red line 6: Short float > 20%
     if short_pct_float is not None:
         pct = short_pct_float * 100 if short_pct_float < 1 else short_pct_float
-        if pct > 20:
+        if pct > rl.get("short_pct_float_max", 20):
             triggers.append({
                 "check": "high_short_interest",
                 "detail": f"空头占比 {pct:.1f}% > 20%",
             })
 
     # Red line 7: Market cap < ¥1B (micro-cap)
-    if market_cap is not None and market_cap < 1_000_000_000:
+    if market_cap is not None and market_cap < rl.get("market_cap_min", 1_000_000_000):
         triggers.append({
             "check": "micro_cap",
             "detail": f"市值 ¥{market_cap:,.0f} < ¥10亿",
         })
 
     # Red line 8: Revenue declining ≥ 3 consecutive years
-    if revenue_growth is not None and revenue_growth < -30:
+    if revenue_growth is not None and revenue_growth < rl.get("revenue_growth_decline", -30):
         triggers.append({
             "check": "terminal_decline",
             "detail": f"营收增速 {revenue_growth:.1f}% — 可能处于持续性衰退",

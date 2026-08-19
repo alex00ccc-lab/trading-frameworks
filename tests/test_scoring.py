@@ -181,6 +181,10 @@ class TestMarksScore:
 # Dong Yiting scoring
 # ══════════════════════════════════════════════════════════════════════════
 
+# 注: 下方边界断言(≥80 优质底仓 / <40 不建仓 / <30 禁止参与)与
+# frame_const.yaml scoring.dong 的 tiers 逐字对齐。若改 config 阈值,需同步更新
+# 这些边界断言(单一事实源见 dual_track._DEFENSIVE_TIERS / _CYCLICAL_TIERS)。
+
 class TestDongScore:
     """董艺婷双轨打分测试"""
 

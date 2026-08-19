@@ -29,11 +29,86 @@ scoring:
   marks:
     pass_threshold: 50        # 马克斯周期分 ≥ 50 方可建仓
   dong:
-    defensive_pass: 60        # 防御股 ≥ 60
-    defensive_floor: 40       # < 40 不建仓
-    cyclical_pass: 50         # 周期股 ≥ 50
-    cyclical_ban: 30          # < 30 禁止参与
-    pass_threshold: 60        # 综合 ≥ 60
+    # 双轨评分(防御/周期)。数值与 dual_track.py / fund_risk_calc.py 逐字对齐(零行为变化)。
+    defensive:
+      pass: 60                # 防御股 ≥ 60 合格底仓
+      floor: 40               # < 40 不建仓
+      tiers:
+        - min: 80
+          verdict: "优质底仓"
+          limit_pct: 15
+          rhythm: "分3批，2-3周完成"
+        - min: 60
+          verdict: "合格底仓"
+          limit_pct: 10
+          rhythm: "分2批，1-2周完成"
+        - min: 40
+          verdict: "观察级"
+          limit_pct: 5
+          rhythm: "仅轻仓观察，不加仓"
+        - min: 0
+          verdict: "不符合防御标准"
+          limit_pct: 0
+          rhythm: "不建仓，等待估值回落或现金流改善"
+    cyclical:
+      pass: 50                # 周期股 ≥ 50 可参与
+      ban: 30                 # < 30 禁止参与
+      tiers:
+        - min: 70
+          verdict: "优质周期机会"
+          limit_pct: 10
+          constraint: "分批建仓，设定明确止盈位"
+        - min: 50
+          verdict: "可参与"
+          limit_pct: 5
+          constraint: "仅小仓位波段，不长期持有"
+        - min: 30
+          verdict: "高风险"
+          limit_pct: 3
+          constraint: "仅迷你仓观察"
+        - min: 0
+          verdict: "禁止参与"
+          limit_pct: 0
+          constraint: "直接排除，不纳入自选"
+    weights:
+      defensive:
+        生意刚需性: 25
+        现金流稳定性: 30
+        估值安全边际: 20
+        资金逆向度: 15
+        组合对冲价值: 10
+      cyclical:
+        景气周期阶段: 30
+        估值水位: 25
+        供给格局: 20
+        防御仓覆盖: 15
+        资金热度: 10
+    neutral:
+      defensive:
+        生意刚需性: 13
+        现金流稳定性: 15
+        估值安全边际: 10
+        资金逆向度: 8
+        组合对冲价值: 5
+      cyclical:
+        景气周期阶段: 15
+        估值水位: 13
+        供给格局: 10
+        防御仓覆盖: 8
+        资金热度: 5
+    red_lines:
+      negative_cashflow_years: 2
+      avg_daily_volume_min: 5000000
+      pe_percentile_high: 90
+      single_stock_concentration_pct: 15
+      debt_equity_max: 2.0
+      short_pct_float_max: 20
+      market_cap_min: 1000000000
+      revenue_growth_decline: -30
+    # 再平衡清仓/减仓线(与建仓门槛语义不同,独立字段,勿混入 defensive.floor)
+    rebalance:
+      clear_threshold: 40
+      reduce_threshold: 50
 
 # ── 降级兜底 ──
 degradation:
@@ -90,6 +165,8 @@ shareholder_alert:
     derivative_noise: 0.0
 
 # ── 行业分类 ──
+# 单一事实源:三处消费方(dual_track / fund_risk_calc / rebalance_engine)统一从本段读取。
+# 值为三处并集(英文 + 中文标签),回填 2026-08-19,确保分类结果不漂移。
 sectors:
   defensive:
     - "Consumer Staples"
@@ -98,6 +175,16 @@ sectors:
     - "Telecom"
     - "Cash Equivalent"
     - "Broad Market Index"
+    # 中文标签(fund_risk_calc / dual_track 原始)
+    - "必选消费"
+    - "医疗保健"
+    - "制药"
+    - "公用事业"
+    - "电信服务"
+    - "企业软件"
+    - "企业SaaS"
+    - "财税软件"
+    - "支付"
   cyclical:
     - "Semiconductors"
     - "Technology Hardware"
@@ -108,3 +195,20 @@ sectors:
     - "Industrial"
     - "Consumer Discretionary"
     - "Real Estate"
+    # 中文标签
+    - "半导体硬件"
+    - "半导体设备"
+    - "半导体IP"
+    - "半导体封测"
+    - "半导体测试"
+    - "通信设备"
+    - "光通信"
+    - "被动元件"
+    - "PCB/元器件"
+    - "新能源"
+    - "储能"
+    - "锂电材料"
+    - "机器人"
+    - "比特币挖矿"
+    - "房地产科技"
+    - "铀矿"
