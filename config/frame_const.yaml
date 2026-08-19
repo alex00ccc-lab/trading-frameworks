@@ -33,6 +33,12 @@ scoring:
     defensive:
       pass: 60                # 防御股 ≥ 60 合格底仓
       floor: 40               # < 40 不建仓
+      # 股东回报(分红+回购)加分 — 防御股核心吸引力之一(v15)
+      # 计入「现金流稳定性」维度,cap 30。enabled:false 即回退原行为(零行为变化)。
+      shareholder_return:
+        enabled: true
+        yield_min: 0.02       # 股东回报率(分红+回购) ≥ 2% 触发加分
+        bonus: 5              # 加分值
       tiers:
         - min: 80
           verdict: "优质底仓"

@@ -79,6 +79,12 @@ CYCLICAL_SECTORS = (
 
 _DONG_CFG = _FRAME_CONST.get("scoring", {}).get("dong", {})
 
+# 股东回报(分红+回购)加分配置 — 防御轨「现金流稳定性」维度内(§框架 v15)
+# enabled:false 即回退原行为(零行为变化)。
+_SHAREHOLDER_RETURN = _DONG_CFG.get("defensive", {}).get("shareholder_return") or {
+    "enabled": True, "yield_min": 0.02, "bonus": 5,
+}
+
 _DEFENSIVE_TIERS = _DONG_CFG.get("defensive", {}).get("tiers") or [
     {"min": 80, "verdict": "优质底仓", "limit_pct": 15, "rhythm": "分3批，2-3周完成"},
     {"min": 60, "verdict": "合格底仓", "limit_pct": 10, "rhythm": "分2批，1-2周完成"},
@@ -237,6 +243,11 @@ def score_defensive(
             score += 5
         if fcf_y is not None and fcf_y < 0:
             score -= 10
+        # 股东回报(分红+回购)加分 — 防御股核心吸引力之一(§框架 v15)
+        if _SHAREHOLDER_RETURN.get("enabled", True):
+            sy = (fund.get("dividend_yield") or 0) + (fund.get("buyback_yield") or 0)
+            if sy >= _SHAREHOLDER_RETURN.get("yield_min", 0.02):
+                score += _SHAREHOLDER_RETURN.get("bonus", 5)
         dims["现金流稳定性"] = max(0, min(30, score))
     elif degrade_to_neutral:
         dims["现金流稳定性"] = NEUTRAL["现金流稳定性"]
