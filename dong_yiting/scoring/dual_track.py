@@ -1,8 +1,9 @@
 """Dong Yiting dual-track scoring framework — pure functions.
 
-Two tracks:
+Three tracks:
   - Defensive (防御股): 5 dimensions, 100 pts total
   - Cyclical  (周期股): 5 dimensions, 100 pts total
+  - Growth    (成长股): 5 dimensions, 100 pts total
 
 All functions are PURE: no IO, no global state, no CLI, no logger.
 All external data (fundamentals, market data) must be passed in explicitly.
@@ -62,6 +63,13 @@ _CYCLICAL_SECTORS_FALLBACK = {
     "比特币挖矿", "房地产科技", "铀矿",
 }
 
+_GROWTH_SECTORS_FALLBACK = {
+    "Communication Services", "Internet", "Media", "Information Technology",
+    "Platform",
+    # Chinese labels
+    "通信服务", "互联网", "信息科技", "平台", "传媒",
+}
+
 DEFENSIVE_SECTORS = (
     set(_SECTORS_CFG.get("defensive")) if _SECTORS_CFG.get("defensive")
     else _DEFENSIVE_SECTORS_FALLBACK
@@ -69,6 +77,10 @@ DEFENSIVE_SECTORS = (
 CYCLICAL_SECTORS = (
     set(_SECTORS_CFG.get("cyclical")) if _SECTORS_CFG.get("cyclical")
     else _CYCLICAL_SECTORS_FALLBACK
+)
+GROWTH_SECTORS = (
+    set(_SECTORS_CFG.get("growth")) if _SECTORS_CFG.get("growth")
+    else _GROWTH_SECTORS_FALLBACK
 )
 
 
@@ -109,6 +121,18 @@ _CYCLICAL_NEUTRAL = _DONG_CFG.get("neutral", {}).get("cyclical") or {
     "防御仓覆盖": 8, "资金热度": 5,
 }
 
+_GROWTH_TIERS = _DONG_CFG.get("growth", {}).get("tiers") or [
+    {"min": 75, "verdict": "优质成长", "limit_pct": 10, "constraint": "分批建仓，成长逻辑证伪即退"},
+    {"min": 55, "verdict": "可参与", "limit_pct": 5, "constraint": "小仓位，跟踪营收/盈利增速是否兑现"},
+    {"min": 35, "verdict": "高风险", "limit_pct": 3, "constraint": "仅迷你仓观察"},
+    {"min": 0, "verdict": "禁止参与", "limit_pct": 0, "constraint": "直接排除，不纳入自选"},
+]
+
+_GROWTH_NEUTRAL = _DONG_CFG.get("neutral", {}).get("growth") or {
+    "营收成长性": 12, "盈利成长性": 12, "盈利质量/护城河": 10,
+    "现金流与财务健康": 7, "估值合理性": 7,
+}
+
 _RED_LINES = _DONG_CFG.get("red_lines") or {
     "negative_cashflow_years": 2,
     "avg_daily_volume_min": 5_000_000,
@@ -126,7 +150,7 @@ def classify_holding(
     sector: str = "",
     known_classifications: Optional[dict[str, str]] = None,
 ) -> str:
-    """Classify a holding as defensive, cyclical, cash, or broad_index.
+    """Classify a holding as defensive, growth, cyclical, cash, or broad_index.
 
     Args:
         symbol: Ticker symbol (e.g. "AAPL", "6981.T", "9992.HK")
@@ -134,7 +158,7 @@ def classify_holding(
         known_classifications: Override map of symbol→classification
 
     Returns:
-        One of: "defensive", "cyclical", "cash", "broad_index",
+        One of: "defensive", "cyclical", "growth", "cash", "broad_index",
                 "defensive_etf", or "unknown"
     """
     # Normalise symbol — strip market suffixes
@@ -153,6 +177,8 @@ def classify_holding(
         return "defensive"
     if sector in CYCLICAL_SECTORS:
         return "cyclical"
+    if sector in GROWTH_SECTORS:
+        return "growth"
 
     return "unknown"
 
@@ -479,6 +505,195 @@ def score_cyclical(
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# Growth track (成长股)
+# ══════════════════════════════════════════════════════════════════════════
+
+def score_growth(
+    symbol: str,
+    *,
+    fundamentals: Optional[dict[str, Any]] = None,
+    revenue_growth: int = 0,
+    earnings_growth: int = 0,
+    margin_quality: int = 0,
+    cashflow_health: int = 0,
+    valuation_reasonableness: int = 0,
+    degrade_to_neutral: bool = False,
+) -> dict[str, Any]:
+    """Score a stock against the growth scoring framework.
+
+    Five dimensions: revenue growth (25) + earnings growth (25) +
+    margin quality/moat (20) + cashflow & financial health (15) +
+    valuation reasonableness (15) = 100.
+
+    Units (与 fundamental cache 约定一致):
+      - revenue_growth / earnings_growth: PERCENT (20.05 = 20.05%)
+      - gross_margins / operating_margins: FRACTION (0.609 = 60.9%)
+      - roe: PERCENT (50.84)
+      - fcf_yield: FRACTION (0.0152)
+      - debt_equity: RATIO (0.1229)
+      - pe: number (17.31)
+
+    Args:
+        symbol: Ticker symbol
+        fundamentals: Pre-fetched fundamental data dict.  Expected keys:
+            revenue_growth, earnings_growth, gross_margins, operating_margins,
+            roe, fcf_yield, debt_equity, pe
+        revenue_growth: Explicit override for 营收成长性 (0-25)
+        earnings_growth: Explicit override for 盈利成长性 (0-25)
+        margin_quality: Explicit override for 盈利质量/护城河 (0-20)
+        cashflow_health: Explicit override for 现金流与财务健康 (0-15)
+        valuation_reasonableness: Explicit override for 估值合理性 (0-15)
+        degrade_to_neutral: If True, missing dimensions get neutral score
+
+    Returns:
+        {symbol, track: "growth", total, verdict, position_limit_pct,
+         constraint, dimensions, note (PEG 附注), generated_at, degraded,
+         missing_dimensions}
+    """
+    fund = fundamentals or {}
+    dims: dict[str, int] = {}
+    degraded = False
+    NEUTRAL = _GROWTH_NEUTRAL
+
+    def _growth_band(g: float) -> int:
+        """营收/盈利增速阶梯(percent): ≥25→25 / 20-25→20 / 15-20→15 / 10-15→10 / 5-10→5 / <5→0."""
+        if g >= 25:
+            return 25
+        if g >= 20:
+            return 20
+        if g >= 15:
+            return 15
+        if g >= 10:
+            return 10
+        if g >= 5:
+            return 5
+        return 0
+
+    # ── Dimension 1: Revenue Growth (25 points) ──
+    if revenue_growth > 0:
+        dims["营收成长性"] = min(revenue_growth, 25)
+    elif fund and fund.get("revenue_growth") is not None:
+        dims["营收成长性"] = _growth_band(float(fund["revenue_growth"]))
+    elif degrade_to_neutral:
+        dims["营收成长性"] = NEUTRAL["营收成长性"]
+        degraded = True
+    else:
+        dims["营收成长性"] = 0
+
+    # ── Dimension 2: Earnings Growth (25 points, truncated ≤40%) ──
+    if earnings_growth > 0:
+        dims["盈利成长性"] = min(earnings_growth, 25)
+    elif fund and fund.get("earnings_growth") is not None:
+        g = min(float(fund["earnings_growth"]), 40.0)  # 截断 ≤40%,避免一次性基数效应
+        dims["盈利成长性"] = _growth_band(g)
+    elif degrade_to_neutral:
+        dims["盈利成长性"] = NEUTRAL["盈利成长性"]
+        degraded = True
+    else:
+        dims["盈利成长性"] = 0
+
+    # ── Dimension 3: Margin Quality / Moat (20 points) ──
+    if margin_quality > 0:
+        dims["盈利质量/护城河"] = min(margin_quality, 20)
+    elif fund:
+        score = 0
+        gm = fund.get("gross_margins")
+        om = fund.get("operating_margins")
+        roe = fund.get("roe")
+        if gm is not None and gm >= 0.40:
+            score += 5
+        if om is not None and om >= 0.20:
+            score += 5
+        if roe is not None and roe >= 20:
+            score += 10
+        dims["盈利质量/护城河"] = max(0, min(20, score))
+    elif degrade_to_neutral:
+        dims["盈利质量/护城河"] = NEUTRAL["盈利质量/护城河"]
+        degraded = True
+    else:
+        dims["盈利质量/护城河"] = 0
+
+    # ── Dimension 4: Cashflow & Financial Health (15 points) ──
+    if cashflow_health > 0:
+        dims["现金流与财务健康"] = min(cashflow_health, 15)
+    elif fund:
+        score = 0
+        fcf = fund.get("fcf_yield")
+        de = fund.get("debt_equity")
+        if fcf is not None and fcf > 0:
+            score += 5
+        if de is not None and de < 0.5:
+            score += 10
+        dims["现金流与财务健康"] = max(0, min(15, score))
+    elif degrade_to_neutral:
+        dims["现金流与财务健康"] = NEUTRAL["现金流与财务健康"]
+        degraded = True
+    else:
+        dims["现金流与财务健康"] = 0
+
+    # ── Dimension 5: Valuation Reasonableness (15 points) ──
+    if valuation_reasonableness > 0:
+        dims["估值合理性"] = min(valuation_reasonableness, 15)
+    elif fund:
+        pe = fund.get("pe")
+        if pe is not None and pe < 0:
+            dims["估值合理性"] = 0  # 亏损:估值维度零分
+        elif pe is not None and pe < 20:
+            dims["估值合理性"] = 15
+        elif pe is not None and pe < 30:
+            dims["估值合理性"] = 10
+        elif pe is not None and pe < 45:
+            dims["估值合理性"] = 5
+        else:
+            dims["估值合理性"] = 0  # 极度昂贵
+    elif degrade_to_neutral:
+        dims["估值合理性"] = NEUTRAL["估值合理性"]
+        degraded = True
+    else:
+        dims["估值合理性"] = 0
+
+    total = sum(dims.values())
+
+    # ── Verdict ──
+    verdict, limit_pct, constraint = "禁止参与", 0, "直接排除，不纳入自选"
+    for tier in sorted(_GROWTH_TIERS, key=lambda t: t.get("min", 0), reverse=True):
+        if total >= tier.get("min", 0):
+            verdict = tier.get("verdict", verdict)
+            limit_pct = tier.get("limit_pct", 0)
+            constraint = tier.get("constraint", "")
+            break
+
+    from datetime import datetime, timezone, timedelta
+
+    # ── PEG 附注(首版用 trailing PE;forward PE 需一致预期,缓存无) ──
+    pe = fund.get("pe")
+    eg = fund.get("earnings_growth")
+    note = ""
+    if pe is not None and eg is not None:
+        growth_rate = max(min(float(eg), 40.0), 5.0)
+        peg = float(pe) / growth_rate
+        note = f"trailing PE {float(pe):.1f} / 成长率 {growth_rate:.0f}% → PEG {peg:.2f}（无 forward 一致预期）"
+
+    return {
+        "symbol": symbol,
+        "track": "growth",
+        "total": max(0, min(100, total)),
+        "max_score": 100,
+        "verdict": verdict,
+        "position_limit_pct": limit_pct,
+        "constraint": constraint,
+        "dimensions": dims,
+        "note": note,
+        "generated_at": datetime.now(timezone(timedelta(hours=8))).isoformat(),
+        "degraded": degraded,
+        "missing_dimensions": [
+            k for k, v in dims.items()
+            if v == NEUTRAL.get(k, 0) and degrade_to_neutral
+        ] if degraded else [],
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # Auto-classify + score
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -529,6 +744,8 @@ def score_holding(
 
     if holding_type == "defensive":
         return score_defensive(symbol, fundamentals=fund, **overrides)
+    elif holding_type == "growth":
+        return score_growth(symbol, fundamentals=fund, **overrides)
     else:
         return score_cyclical(symbol, fundamentals=fund, **overrides)
 

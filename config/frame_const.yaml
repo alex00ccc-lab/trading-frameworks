@@ -22,6 +22,49 @@ industry_limits:
   max_offensive_pct: 35       # 进攻层 ≤ 35%
   min_uncorrelated: 3         # 至少 3 个不相关行业
 
+# ── 分仓四分类(2026-08-20) — role 枚举联动单票上限 + 加仓规则 ──
+# 单票上限按 role 分流(长期核心 15/周期趋势 10/卫星 5/测试 3);更严者优先于
+# position_limits.max_single_pct(15 兜底)。add_rule: profit_only=仅浮盈加仓,
+# forbidden=禁止加仓(建仓即上限)。来源:投资认知与持仓分仓规则_2026-08-20.md §三。
+role_limits:
+  core_long:
+    max_single_pct: 15
+    add_rule: "profit_only"
+  cycle_trend:
+    max_single_pct: 10
+    add_rule: "profit_only"
+  satellite:
+    max_single_pct: 5
+    add_rule: "forbidden"
+  test:
+    max_single_pct: 3
+    add_rule: "forbidden"
+
+# ── 半导体产业链敞口约束(2026-08-20) ──
+# 语义 = 稀释目标 + 新开仓门禁 + 黄色告警,绝不强制卖出(对齐「不机械止损」)。
+# 首版:显性半导体(系数 1.0) + ETF 粗略系数(不拉成分)。精确敞口拆分挂待讨论。
+semi_exposure:
+  max_pct: 20                 # 半导体产业链 ≤ 组合 20%
+  explicit_symbols:
+    - "LRCX"
+    - "6981.T"                # 村田制作所(MLCC)
+    - "2631.HK"               # 天岳先进(SiC)
+    - "SIVE.ST"
+    - "588710"                # 科创半导体ETF
+    - "1888.HK"               # 建滔积层板(覆铜板)
+  etf_coefficients:           # ETF 粗略系数(主题粗估,不拉成分)
+    "588080": 0.5             # 科创50ETF → ~50% 科技/半导体
+    "513010": 0.35            # 恒生科技ETF → ~35% 科技(含半导体)
+
+# ── 宏观拐点预警(2026-08-20) ──
+# 阈值单一事实源;briefing_engine/weekly_review 机械判定,进「今日/本周必看」置顶。
+# 全部只读公开宏观指标(美债收益率/期限结构),不涉及持仓/金额。
+macro_alert:
+  yield_10y_elevated_pct: 4.8     # 10Y 站稳 4.8% → 成长股(长久期)估值承压
+  yield_elevated_persist_days: 10 # 连续 N 个交易日站稳才预警(≈2周,避免单日噪音)
+  term_spread_inversion_pct: 0.0  # 10Y−13W ≤ 0 即倒挂(短端高于长端,衰退信号)
+  dcf_high_yield_pct: 4.5         # 10Y ≥ 4.5% → DCF 传导提示「长久期成长股承压」
+
 # ── 打分阈值 ──
 scoring:
   duan:
@@ -76,6 +119,26 @@ scoring:
           verdict: "禁止参与"
           limit_pct: 0
           constraint: "直接排除，不纳入自选"
+    growth:
+      pass: 55                # 成长股 ≥ 55 可参与
+      ban: 35                 # < 35 禁止参与
+      tiers:
+        - min: 75
+          verdict: "优质成长"
+          limit_pct: 10
+          constraint: "分批建仓，成长逻辑证伪即退"
+        - min: 55
+          verdict: "可参与"
+          limit_pct: 5
+          constraint: "小仓位，跟踪营收/盈利增速是否兑现"
+        - min: 35
+          verdict: "高风险"
+          limit_pct: 3
+          constraint: "仅迷你仓观察"
+        - min: 0
+          verdict: "禁止参与"
+          limit_pct: 0
+          constraint: "直接排除，不纳入自选"
     weights:
       defensive:
         生意刚需性: 25
@@ -89,6 +152,12 @@ scoring:
         供给格局: 20
         防御仓覆盖: 15
         资金热度: 10
+      growth:
+        营收成长性: 25
+        盈利成长性: 25
+        盈利质量/护城河: 20
+        现金流与财务健康: 15
+        估值合理性: 15
     neutral:
       defensive:
         生意刚需性: 13
@@ -102,6 +171,12 @@ scoring:
         供给格局: 10
         防御仓覆盖: 8
         资金热度: 5
+      growth:
+        营收成长性: 12
+        盈利成长性: 12
+        盈利质量/护城河: 10
+        现金流与财务健康: 7
+        估值合理性: 7
     red_lines:
       negative_cashflow_years: 2
       avg_daily_volume_min: 5000000
@@ -218,3 +293,15 @@ sectors:
     - "比特币挖矿"
     - "房地产科技"
     - "铀矿"
+  growth:
+    - "Communication Services"
+    - "Internet"
+    - "Media"
+    - "Information Technology"
+    - "Platform"
+    # 中文标签
+    - "通信服务"
+    - "互联网"
+    - "信息科技"
+    - "平台"
+    - "传媒"
